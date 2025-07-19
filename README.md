@@ -1,20 +1,40 @@
 # gpu_assisted_bpe
 (C)Copyright 2025 George Chan
 
-## Use my old buddy iGPU HD620 to do token matching.
+Use my old buddy iGPU HD620 to do token matching.
 
 ## License
 This project as whole is released as GPLv2. If you found those code are not having a license header then please treat them as GPLv2. I assumed people get a copy of those code notice the copyright.
 
-## Idea of the code itself
+## Abstract
 This is to experiment offloading tokenizerBPE into Vulkan GPU. It does have some good result.
 
 ## Method
 Get llm tokenizer.json and transform into fixed length, then fed into gpu for threaded comparison to user context. Result coded as fix width tokens and display to user the result.
 
 ## Result
-This code shows some buggy output yet to get fixed. Not yet confirm if this is hardware bug or not.
-The tokenizing procedure last long for about 12sec plus loading overhead around 15sec. a bit faster than my own test on llama.cpp with qwen llm running under Intel i5-7200u.
+This code shows some buggy output with WSL2 dozen vulkan driver and yet to get fixed.
+LLVM-pipe is running fine but slow as expected. Still yet to prove stable in real GPU. 
+
+Testing my own build of token key library, using dozen vs llvm:
+
+Tokens: 4095 in dictionary, each token aveage length 20 chars, total 207319 bytes. Compute Shader with 64 threads enabled.
+
+llvm:
+⏱️ Dispatch time: 558031 ms
+✅ Tokenization complete.
+558031/4095 = 136 ms/Tok _OR_ 0.0073 Tok/s
+
+dozen:
+⏱️ Dispatch time: 144046 ms
+✅ Tokenization complete.
+144046/4095 = 35 ms/Tok _OR_ 0.0284 Tok/s
+
+Around 3.78 times faster in dozen.
+
+For short message context:
+The tokenizing procedure last long for about 12sec plus loading overhead around 15sec. 
+A bit faster than my own test on llama.cpp with qwen llm running under Intel i5-7200u.
 
 Output:
 ⏱️ Dispatch time: 12364.8 ms
