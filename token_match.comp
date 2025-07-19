@@ -94,8 +94,10 @@ void main() {
         if (compareToken(byteOffset, k, len)) {
             atomicMax(writeLen, len);
 
-            if (len == atomicAdd(writeLen, 0)) {
-                //uint index = atomicAdd(writeIndex, 1);
+            if (len >= atomicAdd(writeLen, 0)) {
+		/* in case there is any concurrent issue, write again writeLen */
+		atomicMax(writeLen, len);
+
                 encoded[writeIndex] = dictCode[k];
                 atomicMax(inputCursorNext, byteOffset + len);
                 bestMatchLen = len;
