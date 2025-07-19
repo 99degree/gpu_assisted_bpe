@@ -1,0 +1,117 @@
+#version 450
+
+/* there is some insights that hd620 can not get concurrent thread up to 126 */
+/* otherwise the result is not as expected...*/
+layout(local_size_x = 96, local_size_y = 1, local_size_z = 1) in;
+
+// 📥 Input buffer: each uint is a single character
+layout(std430, binding = 0) readonly buffer InputStream {
+    uint input32[];
+};
+
+// 📚 Dictionary buffers
+layout(std430, binding = 1) readonly buffer DictKey {
+    uint dictKey[];
+};
+layout(std430, binding = 2) readonly buffer DictLength {
+    uint dictLength[];
+};
+layout(std430, binding = 3) readonly buffer DictCode {
+    uint dictCode[];
+};
+layout(std430, binding = 4) readonly buffer DictOffset {
+    uint dictOffset[];
+};
+
+// 📤 Output buffer: token IDs
+layout(std430, binding = 5) coherent buffer OutputStream {
+    uint encoded[];
+};
+
+// 🔢 Shared state
+layout(std430, binding = 6) coherent buffer OutputLength {
+    uint writeLen;
+};
+layout(std430, binding = 7) coherent buffer InputCursor {
+    uint inputCursor;
+};
+layout(std430, binding = 8) coherent buffer InputCursorNext {
+    uint inputCursorNext;
+};
+
+// 🧪 Debug output
+layout(std430, binding = 9) coherent buffer DebugBuffer {
+    uint debugOut[];
+};
+
+// 🧮 Output index tracker
+layout(std430, binding = 10) coherent buffer OutputIndex {
+    uint writeIndex;
+};
+
+// Thread ID tracker
+layout(std430, binding = 11) coherent buffer atomicThreadIdCnt {
+    uint atomicThreadID[];
+};
+
+// 🧠 Push constants
+layout(push_constant) uniform Params {
+    uint inputLength;
+    uint maxTokens;
+    uint totalDictKeys;
+};
+
+bool compareToken(uint inputOffset, uint dictIndex, uint len) {
+    uint dictStart = dictOffset[dictIndex];
+    for (uint i = 0; i < len; ++i) {
+        if (inputOffset + i >= inputLength) return false;
+
+	/* assumed the input is variable length utf-8, 
+	   aka normalized 1byte to 4byte per char 
+	 */
+        if ((input32[inputOffset + i]) != (dictKey[dictStart + i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void main() {
+    uint threadID = gl_GlobalInvocationID.x;
+    //uint threadID = atomicAdd(atomicThreadID, 1);
+    if (threadID >= maxTokens || inputCursor >= inputLength) return;
+
+    uint byteOffset = inputCursor;
+    uint bestMatchLen = 0;
+    uint bestMatchIndex = 0xFFFF;
+    bool matched = false;
+
+    for (uint k = threadID; k < totalDictKeys; k += gl_NumWorkGroups.x * gl_WorkGroupSize.x) {
+    //for (uint k = threadID; k < totalDictKeys; k ++) {
+        uint len = dictLength[k];
+        if (byteOffset + len > inputLength) continue;
+
+        if (compareToken(byteOffset, k, len)) {
+            atomicMax(writeLen, len);
+
+            if (len == atomicAdd(writeLen, 0)) {
+                //uint index = atomicAdd(writeIndex, 1);
+                encoded[writeIndex] = dictCode[k];
+                atomicMax(inputCursorNext, byteOffset + len);
+                bestMatchLen = len;
+                bestMatchIndex = k;
+                matched = true;
+            }
+        }
+    }
+
+    // 🧪 Debug output
+    uint debugVal = atomicAdd(debugOut[threadID], 0);
+    if (matched) {
+        debugVal = (1u << 31) | (threadID & 0x7f) << 24 | ((bestMatchLen & 0xFF) << 16) | (bestMatchIndex & 0xFFFF);
+    }
+    debugOut[threadID] = debugVal;
+
+    atomicAdd(atomicThreadID[threadID],1);
+    
+}
