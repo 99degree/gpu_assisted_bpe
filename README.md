@@ -15,3 +15,75 @@ Get llm tokenizer.json and transform into fixed length, then fed into gpu for th
 ## Result
 This code shows some buggy output yet to get fixed. Not yet confirm if this is hardware bug or not.
 
+## build
+glslc token_match.comp -o token_match.spv
+cmake ./
+make
+
+## How to test
+Choose tokenizer.json.* file and rename to tokenizer.json
+./qwen_shader -f tokenizer.json
+
+_OR_
+./qwen_shader -n 100 "the quick fox is jump over the lazy dog"
+
+Then test app will test to tokenize the tokenizer.json file to with itself. Choose other file to test is also fine.
+
+## Output
+
+📁 Loaded prompt from file: "tokenizer.json"
+📝 Prompt: "{
+  "model": {
+    "vocab": {
+      "zero": 0,
+      "one": 1,
+      "two": 2,
+      "three": 3,
+      "four": 4,
+      "five": 5,
+      "six": 6,
+      "seven": 7,
+      "eight": 8,
+      "nine": 9,
+      "ten": 10,
+...
+      "ninety three": 93,
+      "ninety four": 94,
+      "ninety five": 95,
+      "ninety six": 96,
+</s>"
+inputLenBytes:2277 input32.size() 2277
+📚 DictionaryBuilder: Packing tokens
+  [0] Token: "two thousand two hundred and two"
+    Code: 2202, Length: 32
+    Aligned: 116 119 111 32 116 104 111 117 115 97 110 100 32 116 119 111 32 104 117 110 100 114 101 100 32 97 110 100 32 116 119 111
+  [1] Token: "two thousand two hundred and twenty seven"
+    Code: 2227, Length: 41
+    Aligned: 116 119 111 32 116 104 111 117 115 97 110 100 32 116 119 111 32 104 117 110 100 114 101 100 32 97 110 100 32 116 119 101 110 116 121 32 115 101 118 101 110
+  [2] Token: "two thousand two hundred and twenty nine"
+    Code: 2229, Length: 40
+    Aligned: 116 119 111 32 116 104 111 117 115 97 110 100 32 116 119 111 32 104 117 110 100 114 101 100 32 97 110 100 32 116 119 101 110 116 121 32 110 105 110 101
+  [3] Token: "two thousand two hundred and twelve"
+    Code: 2212, Length: 35
+    Aligned: 116 119 111 32 116 104 111 117 115 97 110 100 32 116 119 111 32 104 117 110 100 114 101 100 32 97 110 100 32 116 119 101 108 118 101
+...
+🔁 inputCursor = 2275 missed 1 byte
+🔁 inputCursor = 2276 missed 1 byte
+🔁 inputCursor = 2277 missed 1 byte
+⏱️ Dispatch time: 3120.38 ms
+✅ Tokenization complete.
+🧠 Encoded token results:
+[1] → TokenID: 1 Text: one
+[2] → TokenID: 2 Text: two
+[3] → TokenID: 3 Text: three
+[4] → TokenID: 4 Text: four
+[5] → TokenID: 5 Text: five
+[6] → TokenID: 6 Text: six
+[7] → TokenID: 7 Text: seven
+[8] → TokenID: 8 Text: eight
+[9] → TokenID: 9 Text: nine
+[10] → TokenID: 10 Text: ten
+[11] → TokenID: 11 Text: eleven
+[12] → TokenID: 12 Text: twelve
+[13] → TokenID: 13 Text: thirteen
+...
