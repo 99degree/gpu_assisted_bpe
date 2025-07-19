@@ -41,6 +41,6 @@ std::vector<uint32_t> QwenTokenizer::encodeToBytes(std::string& utf8Char) const 
     return result;
 }
 
-const std::unordered_map<std::string, uint32_t>& QwenTokenizer::vocab() const {
+const std::map<std::string, uint32_t>& QwenTokenizer::vocab() const {
     return vocab_;
 }
