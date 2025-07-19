@@ -14,7 +14,7 @@ Get llm tokenizer.json and transform into fixed length, then fed into gpu for th
 
 ## Result
 This code shows some buggy output yet to get fixed. Not yet confirm if this is hardware bug or not.
-The tokenizing procedure last long for about 12sec plus loading overhead around 15sec. a bit faster than my own test on llama.cpp with qwen llm.
+The tokenizing procedure last long for about 12sec plus loading overhead around 15sec. a bit faster than my own test on llama.cpp with qwen llm running under Intel i5-7200u.
 
 Output:
 ⏱️ Dispatch time: 12364.8 ms
