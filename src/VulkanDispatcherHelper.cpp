@@ -83,10 +83,10 @@ void VulkanDispatcherHelper::dispatchTokenizationLoop(
         if (inputCursorNextVal == inputCursorVal) {
             inputCursorVal += 1;
 
-	    if (displayCnt < 100)
+	    if (displayCnt < 20)
 		std::cout << "🔁 inputCursor = " << inputCursorVal << " missed 1 byte\n";
         } else {
-	    if (displayCnt < 100) {
+	    if (displayCnt < 20) {
 		displayCnt++;
 
 		std::cout << "🔁 inputCursor = " << inputCursorVal

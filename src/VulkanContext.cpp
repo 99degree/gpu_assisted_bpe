@@ -48,6 +48,18 @@ void VulkanContext::pickPhysicalDevice() {
     std::vector<VkPhysicalDevice> devices(count);
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &count, devices.data()));
     physicalDevice = devices[0]; // First available device — customize if needed
+
+    for (int i = 0; i < count; i++) {
+    	VkPhysicalDeviceProperties props;
+    	vkGetPhysicalDeviceProperties(devices[i], &props);
+
+    	std::cout << "Device Name: " << props.deviceName << "\n";
+    	std::cout << "Vendor ID: " << props.vendorID << "\n";
+    	std::cout << "Driver Version: " << props.driverVersion << "\n";
+
+    }
+
+//    physicalDevice = devices[1];
 }
 
 void VulkanContext::createLogicalDevice() {

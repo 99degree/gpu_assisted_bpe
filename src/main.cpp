@@ -223,6 +223,8 @@ std::cout << "L." <<  __LINE__ << "\n";
         for (size_t i = 0; i < encoded.size(); ++i) {
             if (encoded[i] != 0) {
                 std::cout << "[" << i << "] → TokenID: " << (encoded[i]) << " Text: " << dictBuilder.getTokenById(encoded[i]) << "\n";
+		if(encoded[i] != i)
+			std::cout << "Error found!\n";
 	    }
         }
 #if 1
@@ -233,10 +235,12 @@ std::cout << "L." <<  __LINE__ << "\n";
 		uint16_t length = (val >> 16) & 0xFF;
 		uint16_t dictIndex = val & 0xFFFF;
 		uint16_t threadID = (val >> 24) & 0xfF;
+		bool shorter = (val >> 30) & 0x1;
 
 		if (matched) {
 		    std::cout << "Thread " << i << ": ✅ match length " << length <<
-			", dict index " << dictIndex << " custom tid " << threadID << "\n";
+			", dict index " << dictIndex << " shorter " << shorter <<
+			" custom tid " << threadID << "\n";
 		}
 	}
 
