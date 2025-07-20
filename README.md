@@ -7,7 +7,11 @@ Use my old buddy iGPU HD620 to do token matching.
 This project as whole is released as GPLv2. If you found those code are not having a license header then please treat them as GPLv2. I assumed people get a copy of those code notice the copyright.
 
 ## Abstract
-This is to experiment offloading tokenizerBPE into Vulkan GPU. It does have some good result.
+This is to experiment offloading tokenizerBPE matching into Vulkan GPU. It does have some good result.
+
+There is missing letter normalization and pre-tokenization, count pair and iterative merging function are missing. 
+
+So far this code only works with plain ascii. Other letters are most likely treat as space.
 
 ## Method
 Get llm tokenizer.json and transform into fixed length, then fed into gpu for threaded comparison to user context. Result coded as fix width tokens and display to user the result.
