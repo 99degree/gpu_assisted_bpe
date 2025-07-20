@@ -27,12 +27,12 @@ Tokens: 4095 in dictionary, each token aveage length 20 chars, total 207319 byte
 llvm:
 ⏱️ Dispatch time: 558031 ms
 ✅ Tokenization complete.
-558031/4095 = 136 ms/Tok _OR_ 0.0073 Tok/s
+558031/4095 = 136 ms/Tok _OR_ 0.0073 Tok/ms
 
 dozen:
 ⏱️ Dispatch time: 144046 ms
 ✅ Tokenization complete.
-144046/4095 = 35 ms/Tok _OR_ 0.0284 Tok/s
+144046/4095 = 35 ms/Tok _OR_ 0.0284 Tok/ms
 
 Around 3.78 times faster in dozen.
 
