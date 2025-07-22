@@ -1,0 +1,262 @@
+#version 450
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+// 📥 Input buffer: each uint is a single character
+layout(std430, binding = 0) readonly buffer InputStream {
+    uint input32[];
+};
+
+// 📚 Dictionary buffers
+layout(std430, binding = 1) readonly buffer DictKey {
+    uint dictKey[];
+};
+layout(std430, binding = 2) readonly buffer DictLength {
+    uint dictLength[];
+};
+layout(std430, binding = 3) readonly buffer DictCode {
+    uint dictCode[];
+};
+layout(std430, binding = 4) readonly buffer DictOffset {
+    uint dictOffset[];
+};
+
+// 📤 Output buffer: token IDs
+layout(std430, binding = 5) coherent buffer OutputStream {
+    uint encoded[];
+};
+
+// 🔢 Shared state
+layout(std430, binding = 6) coherent buffer OutputLength {
+    uint writeLen;
+};
+layout(std430, binding = 7) coherent buffer InputCursor {
+    uint inputCursor;
+};
+layout(std430, binding = 8) coherent buffer InputCursorNext {
+    uint inputCursorNext;
+};
+
+// 🧪 Debug output
+layout(std430, binding = 9) coherent buffer DebugBuffer {
+    uint debugOut[];
+};
+
+// 🧮 Output index tracker
+layout(std430, binding = 10) coherent buffer OutputIndex {
+    uint writeIndex;
+};
+
+// Thread ID tracker
+layout(std430, binding = 11) coherent buffer atomicThreadIdCnt {
+    uint atomicThreadID[];
+};
+
+// 🧠 Push constants
+layout(push_constant) uniform Params {
+    uint inputLength;
+    uint maxTokens;
+    uint totalDictKeys;
+
+#define STAGE_UINT_EXPANDING	1 << 0
+#define STAGE_UTF_CONV		1 << 1
+#define STAGE_NORMAILIZING	1 << 2
+#define STAGE_MERGING		1 << 3
+#define STAGE_MATCHING		1 << 4
+    uint stageCmd;
+};
+
+bool compareToken(uint inputOffset, uint dictIndex, uint len) {
+    uint dictStart = dictOffset[dictIndex];
+    for (uint i = 0; i < len; ++i) {
+        if (inputOffset + i >= inputLength) return false;
+
+	/* assumed the input is variable length utf-8, 
+	   aka normalized 1byte to 4byte per char 
+	 */
+        if ((input32[inputOffset + i]) != (dictKey[dictStart + i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void main_merge()
+{
+    uint threadID = gl_GlobalInvocationID.x;
+    //uint threadID = atomicAdd(atomicThreadID, 1);
+    if (threadID >= maxTokens || inputCursor >= inputLength) return;
+
+    uint byteOffset = inputCursor;
+    uint bestMatchLen = 0;
+    uint bestMatchIndex = 0xFFFF;
+    bool matched = false;
+
+    for (uint k = threadID; k < totalDictKeys; k += gl_NumWorkGroups.x * gl_WorkGroupSize.x) {
+    //for (uint k = threadID; k < totalDictKeys; k ++) {
+#if 0
+//so far we dont know if we need to use space as a trigger for 
+//stop merging so leave space a of now
+
+	/* this can be optimized because accessing same address by each thread but so far no solution */
+	uint spacePrefix = 0;
+	while (1) {
+		if (input32[byteOffset + spacePrefix] == (uint)' ') {
+			spacePrefix++;
+		else
+			break;
+	}
+#endif
+        uint len = dictLength[k];
+        if (byteOffset + len > inputLength) continue;
+
+        if (compareToken(byteOffset, k, len)) {
+            atomicMax(writeLen, len);
+
+            if (len >= atomicAdd(writeLen, 0)) {
+		/* in case there is any concurrent issue, write again writeLen */
+		atomicMax(writeLen, len);
+
+                encoded[writeIndex] = dictCode[k];
+                atomicMax(inputCursorNext, byteOffset + len);
+                bestMatchLen = len;
+                bestMatchIndex = k;
+                matched = true;
+            }
+        }
+    }
+
+    // 🧪 Debug output
+    uint debugVal = atomicAdd(debugOut[threadID], 0);
+    if (matched) {
+        debugVal = (1u << 31) | (threadID & 0x7f) << 24 | ((bestMatchLen & 0xFF) << 16) | (bestMatchIndex & 0xFFFF);
+    }
+    debugOut[threadID] = debugVal;
+
+    atomicAdd(atomicThreadID[threadID],1);
+    
+}
+
+uint utf_top_mapping[256];
+
+/*
+ * this function make use of xy coord to map f(input32,utf_conv(bytes)), where utf_conv() [0,1,2,3] {}
+*/
+void main_utf()
+{
+	/* since this shader have fixed pipline for y coord so need to loop through */
+	uint threadID = gl_GlobalInvocationID.x;
+
+	/* to simplify the logic, we do a quirk as stride */
+	for (uint k = threadID; k < inputLength; k += gl_NumWorkGroups.x * gl_WorkGroupSize.x) {
+
+		/* spaning from char to uint */
+	        for (uint j = 0; j < 4; j++) {
+			uint byte = (input32[k] >> (j % 4)) & 0xff;
+			encoded[k * 4 + j] = byte;
+		}
+
+		/* every 4 dword repersent 4 possibility of convert result */
+
+		/* first result. at encoded[0], assumed char no need to transform */
+		encoded[k * 4] = input32[k];
+
+		/* case of utf-8 2byte wchar */
+		encoded[k * 4 + 1] = ((input32[k] & 0x1F) << 6) | (input32[k + 1] & 0x3F) ;
+
+		/* case of utf-8 3byte wchar */
+		encoded[k * 4 + 2] = ((input32[0] & 0x0F) << 12) |
+                    ((input32[1] & 0x3F) << 6) |
+                    (input32[2] & 0x3F);
+
+		/* case 4byte wchar */
+		encoded[k * 4 + 3] = ((input32[0] & 0x07) << 18) |
+                    ((input32[1] & 0x3F) << 12) |
+                    ((input32[2] & 0x3F) << 6) |
+                    (input32[3] & 0x3F);
+
+		/* above might not be as all needed. it will hit only one, three other discarded */
+	}
+
+	barrier();
+
+	/* only for thread 0 and make it unique */
+	if (threadID == 0) {
+		uint i = atomicAdd(writeLen, 1);
+		/* if len = 0 means no mapping */
+		/* so we need to skip this char */
+		uint mapLen[8] = { 4,1,2,3,4,0,0,0};
+		if (i == 0) return;
+
+		/* write to encode again for compaction */
+		for (uint i = 0; i < inputLength;) {
+			uint len = utf_top_mapping[(0xff & encoded[i])];
+
+			uint idx = 4 * (i + len + 1); /* index based on char => int */
+			uint outputChar = encoded[idx + len]; /* len is offset */
+			encoded[writeIndex] = outputChar;
+
+			/* protect it incase of more than 1 threads */
+			atomicAdd(writeIndex, len);
+			i += idx;
+		}
+	}
+}
+
+void main()
+{
+	switch (stageCmd) {
+		case STAGE_UINT_EXPANDING:
+			break;
+		case STAGE_UTF_CONV:
+			main_utf();
+			break;
+
+                case STAGE_NORMAILIZING:
+			break;
+
+		/* sould be same.... */
+		case STAGE_MERGING:
+		case STAGE_MATCHING:	
+			main_merge();
+			break;
+		default:
+	}
+}
+
+/* this is a maping table for how many bytes of a utf-8 char have */
+/* the mapping is utf[0] => len(utf) */
+uint utf_top_mapping[] = {
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,
+0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,
+2,2,2,2,2,2,2,2,
+2,2,2,2,2,2,2,2,
+2,2,2,2,2,2,2,2,
+2,2,2,2,2,2,2,2,
+3,3,3,3,3,3,3,3,
+3,3,3,3,3,3,3,3,
+4,4,4,4,4,4,4,4,
+0,0,0,0,0,0,0,0,
+}
