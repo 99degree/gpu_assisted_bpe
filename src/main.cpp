@@ -94,6 +94,12 @@ int main(int argc, char* argv[]) {
 
 	std::cout << "inputLenBytes:" << inputLenBytes << " input32.size() " << input32.size() << "\n";
 
+	if (mode == 1) {
+		//char => uint
+		inputLenBytes = inputLenBytes * 4;
+		maxTokens = inputLenBytes;
+	}
+
         // 📚 Build dictionary buffers
         DictionaryBuilder dictBuilder(tokenizer);
         //dictBuilder.build();
@@ -263,6 +269,9 @@ std::cout << "L." <<  __LINE__ << "\n";
 
 		std::cout << "\n🧵 UTF-32 Code Points:\n";
 		for (size_t i = 0; i < encoded.size(); ++i) {
+                        if (i >= (inputLenBytes / 4))
+			   break;
+
 			uint32_t codepoint = encoded[i];
 			if (codepoint != 0) {
 				std::cout << "U+" << std::hex << std::uppercase << codepoint << " ";
@@ -274,7 +283,7 @@ std::cout << "L." <<  __LINE__ << "\n";
 		std::cout << "\n🧵 UTF-32 Decoded String:\n";
 
 		// Convert encoded[] to UTF-32 string
-		std::u32string utf32str(encoded.begin(), encoded.end());
+		std::u32string utf32str(encoded.begin(), encoded.begin() + inputLenBytes);
 
 		// Convert UTF-32 to UTF-8
 		std::string utf8str = converter.to_bytes(utf32str);

@@ -81,19 +81,25 @@ void main_utf() {
 
     // Thread 0 performs final token extraction
     if (threadID == 0) {
+	// pos index to encoded[]
+	uint pos = 0; 
         uint firstWrite = atomicAdd(writeLen, 1);
-        if (firstWrite == 0) return;
+        if (atomicAdd(writeLen, 0) == 0) return;
 
         // Iterate through encoded buffer and extract valid UTF-8 tokens
+	// inputOffset and inputLength is assumed char idx
         for (uint inputOffset = 0; inputOffset < inputLength;) {
-            uint byteLen = utf_top_mapping[encoded[inputOffset] & 0xFF];
-            uint encodedIndex = 4 * inputOffset + byteLen + 1;
+	    uint inputOffsetPos = inputOffset * 4;
+            uint byteLen = utf_top_mapping[encoded[inputOffsetPos] & 0xFF];
+
+	    //utf_top_mapping is indicating the total length of a utf32 char
+	    // which is started by 1
+            uint encodedIndex = inputOffsetPos + byteLen - 1;
 
             // Bounds check to avoid overflow
-            if (encodedIndex + byteLen < inputLength * 4) {
-                uint outputChar = encoded[encodedIndex + byteLen];
-                encoded[writeIndex] = outputChar;
-                atomicAdd(writeIndex, byteLen);
+            if ((byteLen > 0) && (encodedIndex < (inputLength * 4))) {
+                uint outputChar = encoded[encodedIndex];
+                encoded[pos++] = outputChar;
             }
 
             inputOffset += byteLen;
