@@ -17,6 +17,8 @@
 #include <cstdlib>
 #include <algorithm>  // for std::min
 #include <cstdint>    // for uint32_t
+#include <codecvt>
+#include <locale>
 
 struct PushConstants {
     uint32_t inputLength;     // bytes
@@ -26,11 +28,12 @@ struct PushConstants {
 
 #define VK_CHECK(x) do { VkResult err = x; if (err != VK_SUCCESS) throw std::runtime_error("Vulkan error"); } while (0)
 
-#define TOTAL_VULAKN_PARAM 12
+#define TOTAL_VULKAN_PARAM 12
 
 int main(int argc, char* argv[]) {
     std::string prompt;
     uint limitedLength = -1;
+    int mode = 0;
 
     if (argc < 2) {
         std::cerr << "❌ Usage: " << argv[0] << " [-f filename] OR \"prompt text\"\n";
@@ -58,7 +61,18 @@ int main(int argc, char* argv[]) {
 
         prompt = argv[3];
         std::cout << "📝 Using direct prompt: \"" << prompt << "\"\n";
+    } else if (std::string(argv[1]) == "-u") {
+	// display utf32 string
+	std::cout << "Converting to utf32 by using gpu\n";
 
+	if (argc < 4) {
+		std::cerr << "❌ Missing length after '-u'\n";
+		return 1;
+	}
+	limitedLength = atoi(argv[2]);
+	prompt = argv[3];
+	std::cout << "📝 Using direct prompt: \"" << prompt << "\"\n";
+	mode = 1;
     } else {
         prompt = argv[1];
         std::cout << "📝 Using direct prompt: \"" << prompt << "\"\n";
@@ -119,8 +133,8 @@ int main(int argc, char* argv[]) {
 	BufferHelper::createBufferFromVector(vk.device, vk.physicalDevice, std::vector<uint32_t>(dictBuilder.dictKey().size()), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, buffers[11], memories[11]); //atomicThreadID
 
         // 🧱 Descriptor layout + pipeline
-        std::vector<VkDescriptorSetLayoutBinding> bindings(TOTAL_VULAKN_PARAM);
-        for (uint32_t i = 0; i < TOTAL_VULAKN_PARAM; ++i) {
+        std::vector<VkDescriptorSetLayoutBinding> bindings(TOTAL_VULKAN_PARAM);
+        for (uint32_t i = 0; i < TOTAL_VULKAN_PARAM; ++i) {
             bindings[i].binding = i;
             bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             bindings[i].descriptorCount = 1;
@@ -156,14 +170,14 @@ std::cout << "L." <<  __LINE__ << "\n";
 std::cout << "L." <<  __LINE__ << "\n";
 
         // 🔗 Update descriptors
-        VkDescriptorBufferInfo infos[TOTAL_VULAKN_PARAM];
-        for (int i = 0; i < TOTAL_VULAKN_PARAM; ++i)
+        VkDescriptorBufferInfo infos[TOTAL_VULKAN_PARAM];
+        for (int i = 0; i < TOTAL_VULKAN_PARAM; ++i)
             infos[i] = { buffers[i], 0, VK_WHOLE_SIZE };
 
 std::cout << "L." <<  __LINE__ << "\n";
 
-        std::vector<VkWriteDescriptorSet> writes(TOTAL_VULAKN_PARAM);
-        for (int i = 0; i < TOTAL_VULAKN_PARAM; ++i) {
+        std::vector<VkWriteDescriptorSet> writes(TOTAL_VULKAN_PARAM);
+        for (int i = 0; i < TOTAL_VULKAN_PARAM; ++i) {
             writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[i].dstSet = descriptorSet;
             writes[i].dstBinding = i;
@@ -171,7 +185,7 @@ std::cout << "L." <<  __LINE__ << "\n";
             writes[i].descriptorCount = 1;
             writes[i].pBufferInfo = &infos[i];
         }
-        vkUpdateDescriptorSets(vk.device, TOTAL_VULAKN_PARAM, writes.data(), 0, nullptr);
+        vkUpdateDescriptorSets(vk.device, TOTAL_VULKAN_PARAM, writes.data(), 0, nullptr);
 
 std::cout << "L." <<  __LINE__ << "\n";
 
@@ -214,42 +228,84 @@ std::cout << "L." <<  __LINE__ << "\n";
                 memories[11], //threadit
 		std::min(static_cast<uint32_t>(limitedLength), static_cast<uint32_t>(input32.size())), /* input32 byte aligned */
 		static_cast<uint32_t>(input32.size()), /* assume same to input length, maxTokens generated */
-		static_cast<uint32_t>(dictBuilder.dictKey().size())
+		static_cast<uint32_t>(dictBuilder.dictKey().size()),
+		mode
 	);
 
         // 📤 Read back encoded output
         std::vector<uint32_t> encoded = OutputReader::readEncodedBuffer(vk.device, memories[5], maxTokens);
-        std::cout << "🧠 Encoded token results:\n";
-        for (size_t i = 0; i < encoded.size(); ++i) {
-            if (encoded[i] != 0) {
-                std::cout << "[" << i << "] → TokenID: " << (encoded[i]) << " Text: " << dictBuilder.getTokenById(encoded[i]) << "\n";
-		if(encoded[i] != i)
-			std::cout << "Error found!\n";
-	    }
-        }
-#if 1
-	std::vector<uint32_t> debugOut = OutputReader::readEncodedBuffer(vk.device, memories[9], dictBuilder.dictKey().size());
-	for (size_t i = 0; i < 256; ++i) {
-		uint32_t val = debugOut[i];
-		bool matched = val >> 31;
-		uint16_t length = (val >> 16) & 0xFF;
-		uint16_t dictIndex = val & 0xFFFF;
-		uint16_t threadID = (val >> 24) & 0xfF;
-		bool shorter = (val >> 30) & 0x1;
 
-		if (matched) {
-		    std::cout << "Thread " << i << ": ✅ match length " << length <<
-			", dict index " << dictIndex << " shorter " << shorter <<
-			" custom tid " << threadID << "\n";
+	if (mode == 0) {
+	        std::cout << "🧠 Encoded token results:\n";
+        	for (size_t i = 0; i < encoded.size(); ++i) {
+	            if (encoded[i] != 0) {
+        	        std::cout << "[" << i << "] → TokenID: " << (encoded[i]) << " Text: " << dictBuilder.getTokenById(encoded[i]) << "\n";
+			if(encoded[i] != i)
+				std::cout << "Error found!\n";
+		    }
+        	}
+	} else if (mode == 1) {
+		// 🔡 Show original input string as UTF-32 code points
+		std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
+		std::u32string promptUtf32 = converter.from_bytes(prompt);
+
+		std::cout << "\n🔡 Original text:\n";
+		std::cout << prompt << "\n";
+
+		std::cout << "\n🔡 Original Prompt as UTF-32 Code Points:\n";
+		for (char32_t cp : promptUtf32) {
+		    if (cp != U'\0') {
+		        std::cout << "U+" << std::hex << std::uppercase << cp << " ";
+		    }
 		}
+		std::cout << std::dec << "\n"; // Reset to decimal		
+
+
+		std::cout << "\n🧵 UTF-32 Code Points:\n";
+		for (size_t i = 0; i < encoded.size(); ++i) {
+			uint32_t codepoint = encoded[i];
+			if (codepoint != 0) {
+				std::cout << "U+" << std::hex << std::uppercase << codepoint << " ";
+			}
+		}
+		std::cout << std::dec << "\n"; // Reset to decimal output
+
+
+		std::cout << "\n🧵 UTF-32 Decoded String:\n";
+
+		// Convert encoded[] to UTF-32 string
+		std::u32string utf32str(encoded.begin(), encoded.end());
+
+		// Convert UTF-32 to UTF-8
+		std::string utf8str = converter.to_bytes(utf32str);
+
+		std::cout << utf8str << "\n";
 	}
 
-	std::vector<uint32_t> outThreadID = OutputReader::readEncodedBuffer(vk.device, memories[11], dictBuilder.dictKey().size());
-	for (size_t i = 0; i < 256; ++i) {
-		std::cout << "Thread " << i << " with "<< outThreadID[i] << " invoked times\n";
+	if (mode == 0) {
+		std::vector<uint32_t> debugOut = OutputReader::readEncodedBuffer(vk.device, memories[9], dictBuilder.dictKey().size());
+		for (size_t i = 0; i < 256; ++i) {
+			uint32_t val = debugOut[i];
+			bool matched = val >> 31;
+			uint16_t length = (val >> 16) & 0xFF;
+			uint16_t dictIndex = val & 0xFFFF;
+			uint16_t threadID = (val >> 24) & 0xfF;
+			bool shorter = (val >> 30) & 0x1;
+
+			if (matched) {
+			    std::cout << "Thread " << i << ": ✅ match length " << length <<
+				", dict index " << dictIndex << " shorter " << shorter <<
+				" custom tid " << threadID << "\n";
+			}
+		}
+
+		std::vector<uint32_t> outThreadID = OutputReader::readEncodedBuffer(vk.device, memories[11], dictBuilder.dictKey().size());
+		for (size_t i = 0; i < 256; ++i) {
+			std::cout << "Thread " << i << " with "<< outThreadID[i] << " invoked times\n";
+
+		}
 
 	}
-#endif
         // 🧹 Cleanup
         pipeline.destroy(vk.device);
         vkDestroyDescriptorSetLayout(vk.device, descriptorSetLayout, nullptr);

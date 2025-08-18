@@ -19,6 +19,7 @@ public:
         VkDeviceMemory atomicThreadIdMem,
         uint32_t inputLengthBytes,
         uint32_t maxTokens,
-        uint32_t totalDictKeys
+        uint32_t totalDictKeys,
+	uint32_t mode
     );
 };

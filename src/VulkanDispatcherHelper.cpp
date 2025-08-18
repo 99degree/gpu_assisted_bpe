@@ -24,7 +24,8 @@ void VulkanDispatcherHelper::dispatchTokenizationLoop(
     VkDeviceMemory atomicThreadIdMem,
     uint32_t inputLengthBytes,
     uint32_t maxTokens,
-    uint32_t totalDictKeys
+    uint32_t totalDictKeys,
+    uint32_t mode
 ) {
 
     /* inputLengthBytes is becoming char -> int */
@@ -78,6 +79,9 @@ void VulkanDispatcherHelper::dispatchTokenizationLoop(
 
         inputCursorNextVal = BufferHelper::readScalarFromBuffer<uint32_t>(device, inputCursorNextMem);
 	writeLenVal = BufferHelper::readScalarFromBuffer<uint32_t>(device, writeLenMem);
+
+	if (mode > 0)
+		break;
 
 	//if (writeLenVal > 0) {
         if (inputCursorNextVal == inputCursorVal) {
