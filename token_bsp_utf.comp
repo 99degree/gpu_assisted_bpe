@@ -1,0 +1,107 @@
+#version 450
+
+// Define the number of threads per workgroup
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+// Input buffer: contains UTF-32 encoded characters
+layout(std430, binding = 0) readonly buffer InputStream {
+    uint input32[];
+};
+
+// Output buffer: stores encoded UTF-8 bytes and final token output
+layout(std430, binding = 5) coherent buffer OutputStream {
+    uint encoded[];
+};
+
+// Shared scalar buffers for tracking output length and write index
+layout(std430, binding = 6) coherent buffer OutputLength {
+    uint writeLen;
+};
+
+layout(std430, binding = 10) coherent buffer OutputIndex {
+    uint writeIndex;
+};
+
+// Push constants: small configuration values passed to the shader
+layout(push_constant) uniform Params {
+    uint inputLength;      // Number of input characters
+    uint maxTokens;        // Max number of tokens to generate
+    uint totalDictKeys;    // Size of dictionary (not used here)
+};
+
+// Lookup table: maps leading byte to expected UTF-8 sequence length
+uint utf_top_mapping[] = {
+    // 0–127: ASCII (1 byte)
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    // 128–191: continuation bytes (invalid as leading byte)
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    // 192–223: 2-byte sequences
+    2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+    // 224–239: 3-byte sequences
+    3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
+    // 240–247: 4-byte sequences
+    4,4,4,4,4,4,4,4,
+    // 248–255: invalid
+    0,0,0,0,0,0,0,0
+};
+
+// Main UTF-8 conversion function
+void main_utf() {
+    uint threadID = gl_GlobalInvocationID.x;
+
+    // Each thread processes one or more characters
+    for (uint charIndex = threadID; charIndex < inputLength; charIndex += gl_NumWorkGroups.x * gl_WorkGroupSize.x) {
+        // Cache input characters to avoid redundant memory access
+        uint inputChar0 = input32[charIndex];
+        uint inputChar1 = (charIndex + 1 < inputLength) ? input32[charIndex + 1] : 0;
+        uint inputChar2 = (charIndex + 2 < inputLength) ? input32[charIndex + 2] : 0;
+        uint inputChar3 = (charIndex + 3 < inputLength) ? input32[charIndex + 3] : 0;
+
+        // Compute base index for writing to encoded buffer
+        uint baseIndex = charIndex * 4;
+
+        // Write raw bytes (bit-shifted view of inputChar0)
+        for (uint byteIndex = 0; byteIndex < 4; byteIndex++) {
+            encoded[baseIndex + byteIndex] = (inputChar0 >> (byteIndex % 4)) & 0xFF;
+        }
+
+        // Write UTF-8 conversion variants (1–4 byte sequences)
+        encoded[baseIndex]     = inputChar0;
+        encoded[baseIndex + 1] = ((inputChar0 & 0x1F) << 6) | (inputChar1 & 0x3F);
+        encoded[baseIndex + 2] = ((inputChar0 & 0x0F) << 12) | ((inputChar1 & 0x3F) << 6) | (inputChar2 & 0x3F);
+        encoded[baseIndex + 3] = ((inputChar0 & 0x07) << 18) | ((inputChar1 & 0x3F) << 12) | ((inputChar2 & 0x3F) << 6) | (inputChar3 & 0x3F);
+    }
+
+    // Synchronize threads before post-processing
+    barrier();
+
+    // Thread 0 performs final token extraction
+    if (threadID == 0) {
+        uint firstWrite = atomicAdd(writeLen, 1);
+        if (firstWrite == 0) return;
+
+        // Iterate through encoded buffer and extract valid UTF-8 tokens
+        for (uint inputOffset = 0; inputOffset < inputLength;) {
+            uint byteLen = utf_top_mapping[encoded[inputOffset] & 0xFF];
+            uint encodedIndex = 4 * inputOffset + byteLen + 1;
+
+            // Bounds check to avoid overflow
+            if (encodedIndex + byteLen < inputLength * 4) {
+                uint outputChar = encoded[encodedIndex + byteLen];
+                encoded[writeIndex] = outputChar;
+                atomicAdd(writeIndex, byteLen);
+            }
+
+            inputOffset += byteLen;
+        }
+    }
+}
+
+// Entry point
+void main() {
+    main_utf();
+}
