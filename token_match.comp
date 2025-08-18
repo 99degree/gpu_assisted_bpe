@@ -63,6 +63,7 @@ layout(push_constant) uniform Params {
 
 bool compareToken(uint inputOffset, uint dictIndex, uint len) {
     uint dictStart = dictOffset[dictIndex];
+
     for (uint i = 0; i < len; ++i) {
         if (inputOffset + i >= inputLength) return false;
 
@@ -88,6 +89,17 @@ void main() {
 
     for (uint k = threadID; k < totalDictKeys; k += gl_NumWorkGroups.x * gl_WorkGroupSize.x) {
     //for (uint k = threadID; k < totalDictKeys; k ++) {
+
+	uint foundLeadingSpace = 0;
+
+	while (1) {
+		if ((input32[inputOffset] == (uint)' ') {
+			byteOffset++;
+			foundLeadingSpace++;
+		} else
+			break;
+	}
+
         uint len = dictLength[k];
         if (byteOffset + len > inputLength) continue;
 
@@ -99,7 +111,7 @@ void main() {
 		atomicMax(writeLen, len);
 
                 encoded[writeIndex] = dictCode[k];
-                atomicMax(inputCursorNext, byteOffset + len);
+                atomicMax(inputCursorNext, byteOffset + len + foundLeadingSpace);
                 bestMatchLen = len;
                 bestMatchIndex = k;
                 matched = true;
