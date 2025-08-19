@@ -16,6 +16,28 @@ So far this code only works with plain ascii. Other letters are most likely trea
 ## Method
 Get llm tokenizer.json and transform into fixed length, then fed into gpu for threaded comparison to user context. Result coded as fix width tokens and display to user the result.
 
+### Available algos
+There are currently 2 available algos.
+
+token_match.comp -- This is bpe core Longest matching algo, aka TableBPE
+token_bsp_utf.comp -- This is utf8 -> utf32 convert algo, aka DashUTF32
+
+Generally DashUTF32 algo is a kind of pre-requist for GPU BPE either implement in GPU or CPU. According to the nature of GPU arch, it's addressing mode is by 32bits or 64bits. Due to this reason, it is either transform utf-8 (variable length coding) into utf-32 (fixed length) by CPU and transfer to GPU process; or single pass with GPU. So to speed things up, it is best to do in GPU with long input to compensate the full trip HOST<->GPU expense.
+
+If input string is short like few kilobyte, it is better to do in CPU. It is very simple as user input is short and user uploaded files long enough.
+
+Once GPU is loaded with fixed sized wording as input, TableBPE is able to trim in for token matching.
+
+### Status
+Since HuggingFase's BPE is more than matching, as below, so similar trick can be applied either by TableBPE method or DashUTF32 method.
+- input verification -- No available detail
+- input trunking -- nil, seemed no needed
+- input merging -- similar to TableBPE
+- input utf normalization (NFKD/NFC/NFD) -- similar to TableBPE
+- input tokenizing/matching -- on-par with TableBPE
+
+So far this project is not ready to replace llama/HuggingFace BPE atm.
+
 ## Result
 This code shows some buggy output with WSL2 dozen vulkan driver and yet to get fixed.
 LLVM-pipe is running fine but slow as expected. Still yet to prove stable in real GPU. 
@@ -48,9 +70,15 @@ Output:
 [1] → TokenID: 1 Text: "
 
 ## build
+
 glslc token_match.comp -o token_match.spv
+_OR_
+glslc token_bsp_utf.comp -o token_match.spv
+
 cmake ./
 make
+
+Done!
 
 ## How to test
 Choose tokenizer.json.* file and rename to tokenizer.json
