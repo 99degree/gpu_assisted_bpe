@@ -99,7 +99,7 @@ void main_utf() {
         uint firstWrite = atomicAdd(writeLen, 1);
         uint currentLen = atomicAdd(writeLen, 0);
 
-        if (currentLen > 0) {
+        if (currentLen == 1) {
             uint pos = 0;
             for (uint offset = 0; offset < inputLength * 4;) {
                 uint idx = offset * 4;
