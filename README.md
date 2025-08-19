@@ -19,8 +19,8 @@ Get llm tokenizer.json and transform into fixed length, then fed into gpu for th
 ### Available algos
 There are currently 2 available algos.
 
-token_match.comp -- This is bpe core Longest matching algo, aka TableBPE
-token_bsp_utf.comp -- This is utf8 -> utf32 convert algo, aka DashUTF32
+    token_match.comp -- This is bpe core Longest matching algo, aka TableBPE
+    token_bsp_utf.comp -- This is utf8 -> utf32 convert algo, aka DashUTF32
 
 Generally DashUTF32 algo is a kind of pre-requist for GPU BPE either implement in GPU or CPU. According to the nature of GPU arch, it's addressing mode is by 32bits or 64bits. Due to this reason, it is either transform utf-8 (variable length coding) into utf-32 (fixed length) by CPU and transfer to GPU process; or single pass with GPU. So to speed things up, it is best to do in GPU with long input to compensate the full trip HOST<->GPU expense.
 
