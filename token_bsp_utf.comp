@@ -54,6 +54,94 @@ uint utf_top_mapping[] = {
     0,0,0,0,0,0,0,0
 };
 
+
+int writeRawByte(uint charIndex) {
+	uint baseIndex = charIndex * 4 * 4; //make it every 4 of 32bits to index a char
+
+        // Write raw bytes (bit-shifted view of inputChar0)
+        // char => uint expansion  e.g. 0x00000030 0x000000031 0x00000032 0x00000033 for "0123" as 0x33323130
+        for (uint byteIndex = 0; byteIndex < 4; byteIndex++) {
+                encoded[baseIndex + byteIndex * 4] = (input32[charIndex] >> (byteIndex * 8)) & 0xFF;
+        }
+
+	return 0;
+}
+
+int writeRawByteExtend(uint charIndex) {
+        uint baseIndex = charIndex * 4 * 4; //make it every 4 of 32bits to index a char
+        uint inputChar[8];
+
+        for (uint byteIndex = 0; byteIndex < 4; byteIndex++) {
+                inputChar[byteIndex] = (input32[charIndex] >> (byteIndex * 8)) & 0xFF;
+                inputChar[byteIndex + 4] = (input32[charIndex + 1] >> (byteIndex * 8)) & 0xFF;
+        }
+
+#if 1
+	uint byteIndex = 0;
+	// Write UTF-8 conversion variants (1–4 byte sequences)
+	debugOut[baseIndex + byteIndex * 4 + 0] = inputChar[0];
+	debugOut[baseIndex + byteIndex * 4 + 1] = ((inputChar[0] & 0x1F) << 6) | (inputChar[1] & 0x3F);
+	debugOut[baseIndex + byteIndex * 4 + 2] = ((inputChar[0] & 0x0F) << 12) | ((inputChar[1] & 0x3F) << 6) | (inputChar[2] & 0x3F);
+	debugOut[baseIndex + byteIndex * 4 + 3] = ((inputChar[0] & 0x07) << 18) | ((inputChar[1] & 0x3F) << 12) | 
+								((inputChar[2] & 0x3F) << 6) | (inputChar[3] & 0x3F);
+
+	encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
+        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
+        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
+        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
+#endif
+#if 1
+        byteIndex = 1;
+	// Write UTF-8 conversion variants (1–4 byte sequences)
+	debugOut[baseIndex + byteIndex * 4 + 0] = inputChar[byteIndex];
+	debugOut[baseIndex + byteIndex * 4 + 1] = ((inputChar[byteIndex] & 0x1F) << 6) | (inputChar[byteIndex + 1] & 0x3F);
+	debugOut[baseIndex + byteIndex * 4 + 2] = ((inputChar[byteIndex] & 0x0F) << 12) | ((inputChar[byteIndex + 1] & 0x3F) << 6) | 
+							(inputChar[byteIndex + 2] & 0x3F);
+	debugOut[baseIndex + byteIndex * 4 + 3] = ((inputChar[byteIndex] & 0x07) << 18) | ((inputChar[byteIndex + 1] & 0x3F) << 12) |
+							((inputChar[byteIndex + 2] & 0x3F) << 6) | (inputChar[byteIndex + 3] & 0x3F);
+
+        encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
+        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
+        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
+        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
+
+#endif
+#if 1
+        byteIndex = 2;
+        // Write UTF-8 conversion variants (1–4 byte sequences)
+        debugOut[baseIndex + byteIndex * 4 + 0] = inputChar[byteIndex];
+        debugOut[baseIndex + byteIndex * 4 + 1] = ((inputChar[byteIndex] & 0x1F) << 6) | (inputChar[byteIndex + 1] & 0x3F);
+        debugOut[baseIndex + byteIndex * 4 + 2] = ((inputChar[byteIndex] & 0x0F) << 12) | ((inputChar[byteIndex + 1] & 0x3F) << 6) |
+                                                        (inputChar[byteIndex + 2] & 0x3F);
+        debugOut[baseIndex + byteIndex * 4 + 3] = ((inputChar[byteIndex] & 0x07) << 18) | ((inputChar[byteIndex + 1] & 0x3F) << 12) |
+                                                        ((inputChar[byteIndex + 2] & 0x3F) << 6) | (inputChar[byteIndex + 3] & 0x3F);
+
+        encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
+        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
+        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
+        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
+
+#endif
+#if 1
+        byteIndex = 3;
+        // Write UTF-8 conversion variants (1–4 byte sequences)
+        debugOut[baseIndex + byteIndex * 4 + 0] = inputChar[byteIndex];
+        debugOut[baseIndex + byteIndex * 4 + 1] = ((inputChar[byteIndex] & 0x1F) << 6) | (inputChar[byteIndex + 1] & 0x3F);
+        debugOut[baseIndex + byteIndex * 4 + 2] = ((inputChar[byteIndex] & 0x0F) << 12) | ((inputChar[byteIndex + 1] & 0x3F) << 6) |
+                                                        (inputChar[byteIndex + 2] & 0x3F);
+        debugOut[baseIndex + byteIndex * 4 + 3] = ((inputChar[byteIndex] & 0x07) << 18) | ((inputChar[byteIndex + 1] & 0x3F) << 12) |
+                                                        ((inputChar[byteIndex + 2] & 0x3F) << 6) | (inputChar[byteIndex + 3] & 0x3F);
+
+        encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
+        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
+        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
+        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
+
+#endif
+
+	return 0;
+}
+
 // Main UTF-8 conversion function
 void main_utf() {
     uint threadID = gl_GlobalInvocationID.x;
@@ -61,25 +149,15 @@ void main_utf() {
     // Each thread processes one or more characters
     for (uint charIndex = threadID; charIndex < inputLength; charIndex += gl_NumWorkGroups.x * gl_WorkGroupSize.x) {
         // Compute base index for writing to encoded buffer
-        uint baseIndex = charIndex * 4 * 4; //make it every 4 of 32bits to index a char 
-	uint inputChar[4];
 
-        // Write raw bytes (bit-shifted view of inputChar0)
-	// char => uint expansion  e.g. 0x00000030 0x000000031 0x00000032 0x00000033 for "0123" as 0x33323130
-        for (uint byteIndex = 0; byteIndex < 4; byteIndex++) {
-            inputChar[byteIndex] = encoded[baseIndex + byteIndex * 4] = debugOut[baseIndex + byteIndex * 4] = (input32[charIndex] >> (byteIndex * 8)) & 0xFF;
-        }
+        writeRawByte(charIndex);
+        writeRawByte(charIndex + 1);
+	writeRawByteExtend(charIndex);
 
-#if 1
-        // Write UTF-8 conversion variants (1–4 byte sequences)
-        encoded[baseIndex + 0] = debugOut[baseIndex + 0] = inputChar[0];
-        encoded[baseIndex + 1] = debugOut[baseIndex + 1] = ((inputChar[0] & 0x1F) << 6) | (inputChar[1] & 0x3F);
-        encoded[baseIndex + 2] = debugOut[baseIndex + 2] = ((inputChar[0] & 0x0F) << 12) | ((inputChar[1] & 0x3F) << 6) | (inputChar[2] & 0x3F);
-        encoded[baseIndex + 3] = debugOut[baseIndex + 3] = ((inputChar[0] & 0x07) << 18) | ((inputChar[1] & 0x3F) << 12) | ((inputChar[2] & 0x3F) << 6) | (inputChar[3] & 0x3F);
-#endif
+//        return;
     }
 
-	return;
+//	return;
 
     // Synchronize threads before post-processing
     barrier();
@@ -111,8 +189,11 @@ void main_utf() {
             // Bounds check to avoid overflow
             if ((byteLen > 0) && (encodedIndex < (inputLength * 4))) {
                 uint outputChar = debugOut[encodedIndex];
-                encoded[pos++] = outputChar | 0xf0000000 | writeLen<<24;
-		encoded[pos+1] = 0xff000000;
+		uint byteLen1 = utf_top_mapping[debugOut[inputOffset * 4 + byteLen * 4] & 0xFF];
+		uint pos1;
+		uint encodedIndex1 = (inputOffset + byteLen) * 4 * 4 + byteLen1;
+                encoded[pos1 = pos++] = outputChar | 0xf0000000 | byteLen << 24;
+		encoded[pos1+1] = 0xf0000000 | byteLen1 << 24 | debugOut[encodedIndex1];
             }
 
             inputOffset += byteLen;

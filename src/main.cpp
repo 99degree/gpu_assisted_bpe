@@ -283,7 +283,25 @@ std::cout << "L." <<  __LINE__ << "\n";
 				std::cout << "Error found!\n";
 		    }
         	}
-	} else if (mode == 1) {
+	}
+
+        if (mode == 1) {
+		std::cout << "\ndebugOut: \n";
+                std::vector<uint32_t> debugOut = OutputReader::readEncodedBuffer(vk.device, memories[9], dictBuilder.dictKey().size());
+                for (size_t i = 0; i < debugOut.size(); ++i) {
+                        if (i >= (inputLenBytes / 4))
+                           break;
+
+                        uint32_t codepoint = debugOut[i];
+//                      if (codepoint != 0) {
+                                std::cout << "U+" << std::hex << std::uppercase << codepoint << " ";
+//                      }
+                }
+
+		std::cout << "\n";
+        }
+
+	if (mode == 1) {
 		// 🔡 Show original input string as UTF-32 code points
 		std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
 		std::u32string promptUtf32 = converter.from_bytes(prompt);
@@ -350,6 +368,7 @@ std::cout << "L." <<  __LINE__ << "\n";
 		}
 
 	}
+
         // 🧹 Cleanup
         pipeline.destroy(vk.device);
         vkDestroyDescriptorSetLayout(vk.device, descriptorSetLayout, nullptr);
