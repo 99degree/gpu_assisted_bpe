@@ -59,7 +59,7 @@ void VulkanContext::pickPhysicalDevice() {
 
     }
 
-//    physicalDevice = devices[1];
+    physicalDevice = devices[1];
 }
 
 void VulkanContext::createLogicalDevice() {

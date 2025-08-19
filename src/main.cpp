@@ -19,6 +19,26 @@
 #include <cstdint>    // for uint32_t
 #include <codecvt>
 #include <locale>
+#include <cstring>
+
+#include <iostream>
+#include <vector>
+#include <cstdint>
+#include <iomanip> // for std::hex
+
+void printRawBytes(const std::vector<uint32_t>& data) {
+    std::cout << "🔍 Raw bytes of vector<uint32_t>:\n";
+
+    const uint8_t* bytePtr = reinterpret_cast<const uint8_t*>(data.data());
+    size_t byteCount = data.size() * sizeof(uint32_t);
+
+    for (size_t i = 0; i < byteCount; ++i) {
+        std::cout << "0x" << std::hex << std::setw(2) << std::setfill('0')
+                  << static_cast<int>(bytePtr[i]) << " ";
+        if ((i + 1) % 16 == 0) std::cout << "\n";
+    }
+    std::cout << std::dec << "\n"; // Reset formatting
+}
 
 struct PushConstants {
     uint32_t inputLength;     // bytes
@@ -97,7 +117,20 @@ int main(int argc, char* argv[]) {
 	if (mode == 1) {
 		//char => uint
 		inputLenBytes = inputLenBytes * 4;
-		maxTokens = inputLenBytes;
+		maxTokens = inputLenBytes * 4;
+		const char* utf8str = prompt.data();
+		size_t len = strlen(utf8str);
+
+		// Pad to multiple of 4 bytes if needed
+		size_t paddedLen = ((len + 3) / 4) * 4;
+		std::vector<uint8_t> padded(utf8str, utf8str + len);
+		padded.resize(paddedLen, 0); // pad with zeros
+
+		// Reinterpret as uint32_t
+		std::vector<uint32_t> rawChunks(paddedLen / 4);
+		memcpy(rawChunks.data(), padded.data(), paddedLen);
+		input32 = rawChunks;
+
 	}
 
         // 📚 Build dictionary buffers
@@ -233,7 +266,7 @@ std::cout << "L." <<  __LINE__ << "\n";
 		memories[10], //writeidx
                 memories[11], //threadit
 		std::min(static_cast<uint32_t>(limitedLength), static_cast<uint32_t>(input32.size())), /* input32 byte aligned */
-		static_cast<uint32_t>(input32.size()), /* assume same to input length, maxTokens generated */
+		static_cast<uint32_t>(inputLenBytes), /* assume same to input length, maxTokens generated */
 		static_cast<uint32_t>(dictBuilder.dictKey().size()),
 		mode
 	);
@@ -258,6 +291,8 @@ std::cout << "L." <<  __LINE__ << "\n";
 		std::cout << "\n🔡 Original text:\n";
 		std::cout << prompt << "\n";
 
+		printRawBytes(input32);
+
 		std::cout << "\n🔡 Original Prompt as UTF-32 Code Points:\n";
 		for (char32_t cp : promptUtf32) {
 		    if (cp != U'\0') {
@@ -273,9 +308,9 @@ std::cout << "L." <<  __LINE__ << "\n";
 			   break;
 
 			uint32_t codepoint = encoded[i];
-			if (codepoint != 0) {
+//			if (codepoint != 0) {
 				std::cout << "U+" << std::hex << std::uppercase << codepoint << " ";
-			}
+//			}
 		}
 		std::cout << std::dec << "\n"; // Reset to decimal output
 

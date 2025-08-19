@@ -18,6 +18,11 @@ layout(std430, binding = 6) coherent buffer OutputLength {
     uint writeLen;
 };
 
+// 🧪 Debug output
+layout(std430, binding = 9) coherent buffer DebugBuffer {
+    uint debugOut[];
+};
+
 layout(std430, binding = 10) coherent buffer OutputIndex {
     uint writeIndex;
 };
@@ -55,26 +60,26 @@ void main_utf() {
 
     // Each thread processes one or more characters
     for (uint charIndex = threadID; charIndex < inputLength; charIndex += gl_NumWorkGroups.x * gl_WorkGroupSize.x) {
-        // Cache input characters to avoid redundant memory access
-        uint inputChar0 = input32[charIndex];
-        uint inputChar1 = (charIndex + 1 < inputLength) ? input32[charIndex + 1] : 0;
-        uint inputChar2 = (charIndex + 2 < inputLength) ? input32[charIndex + 2] : 0;
-        uint inputChar3 = (charIndex + 3 < inputLength) ? input32[charIndex + 3] : 0;
-
         // Compute base index for writing to encoded buffer
-        uint baseIndex = charIndex * 4;
+        uint baseIndex = charIndex * 4 * 4; //make it every 4 of 32bits to index a char 
+	uint inputChar[4];
 
         // Write raw bytes (bit-shifted view of inputChar0)
+	// char => uint expansion  e.g. 0x00000030 0x000000031 0x00000032 0x00000033 for "0123" as 0x33323130
         for (uint byteIndex = 0; byteIndex < 4; byteIndex++) {
-            encoded[baseIndex + byteIndex] = (inputChar0 >> (byteIndex % 4)) & 0xFF;
+            inputChar[byteIndex] = encoded[baseIndex + byteIndex * 4] = debugOut[baseIndex + byteIndex * 4] = (input32[charIndex] >> (byteIndex * 8)) & 0xFF;
         }
 
+#if 1
         // Write UTF-8 conversion variants (1–4 byte sequences)
-        encoded[baseIndex]     = inputChar0;
-        encoded[baseIndex + 1] = ((inputChar0 & 0x1F) << 6) | (inputChar1 & 0x3F);
-        encoded[baseIndex + 2] = ((inputChar0 & 0x0F) << 12) | ((inputChar1 & 0x3F) << 6) | (inputChar2 & 0x3F);
-        encoded[baseIndex + 3] = ((inputChar0 & 0x07) << 18) | ((inputChar1 & 0x3F) << 12) | ((inputChar2 & 0x3F) << 6) | (inputChar3 & 0x3F);
+        encoded[baseIndex + 0] = debugOut[baseIndex + 0] = inputChar[0];
+        encoded[baseIndex + 1] = debugOut[baseIndex + 1] = ((inputChar[0] & 0x1F) << 6) | (inputChar[1] & 0x3F);
+        encoded[baseIndex + 2] = debugOut[baseIndex + 2] = ((inputChar[0] & 0x0F) << 12) | ((inputChar[1] & 0x3F) << 6) | (inputChar[2] & 0x3F);
+        encoded[baseIndex + 3] = debugOut[baseIndex + 3] = ((inputChar[0] & 0x07) << 18) | ((inputChar[1] & 0x3F) << 12) | ((inputChar[2] & 0x3F) << 6) | (inputChar[3] & 0x3F);
+#endif
     }
+
+	return;
 
     // Synchronize threads before post-processing
     barrier();
@@ -89,8 +94,15 @@ void main_utf() {
         // Iterate through encoded buffer and extract valid UTF-8 tokens
 	// inputOffset and inputLength is assumed char idx
         for (uint inputOffset = 0; inputOffset < inputLength;) {
-	    uint inputOffsetPos = inputOffset * 4;
-            uint byteLen = utf_top_mapping[encoded[inputOffsetPos] & 0xFF];
+	    uint inputOffsetPos = inputOffset * 4 * 4;
+            uint byteLen = utf_top_mapping[debugOut[inputOffsetPos] & 0xFF];
+
+	    if (byteLen > 4 || byteLen == 0) {
+		encoded[pos++] = 0xff000000 | (debugOut[inputOffsetPos] & 0xFF) | byteLen << 16;
+		inputOffset++;
+//		break;
+		continue;
+	    }
 
 	    //utf_top_mapping is indicating the total length of a utf32 char
 	    // which is started by 1
@@ -98,11 +110,15 @@ void main_utf() {
 
             // Bounds check to avoid overflow
             if ((byteLen > 0) && (encodedIndex < (inputLength * 4))) {
-                uint outputChar = encoded[encodedIndex];
-                encoded[pos++] = outputChar;
+                uint outputChar = debugOut[encodedIndex];
+                encoded[pos++] = outputChar | 0xf0000000 | writeLen<<24;
+		encoded[pos+1] = 0xff000000;
             }
 
             inputOffset += byteLen;
+
+
+//		break;
         }
     }
 }
