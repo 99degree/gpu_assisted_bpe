@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE article PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN" "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd">
+<article lang="">
+  <sect1><title>TableBPE: GPU Table BPE Tokenization</title>TableGPUTable </sect1>
+  <sect1><title>Abstract </title>Abstract<para>Tokenization is extremely slow in personal computer during preprocessing step in large language model pipelines compared to batch inference step like llama, yet BPE module is remain CPU-bounded. I am about to present TableBPE, a mixed CPU-GPU implementation of byte-pair matching (BPM) that roughly linear-time complexity under general case and is compromised the advantage of GPU and locking for low to moderate throughput, batch inference on low power device. This is similar to a newly proposed BPE variant, aka BlockBPE by Amos You, and exhibit O(nd’) runtime BPE vs O(nlogn) vs O(nd) and eliminates the Regex pre-tokenization which consumed many time in serial process, on-par in generation quality, reducing overall complexity to O(nd). On moderate-batch inference workloads, <ulink url="https://github.com/99degree/gpu_assisted_bpe/tree/utf">TableBPE</ulink> achieves similar speed to BlockBPE, assumed up to 2x higher throughput than tiktoken and 2.5x over HuggingFace Tokenizers. </para></sect1>
+  <sect1>
+    <title>Introduction</title>
+    <para>BPE module in a LLM model is traditionally CPU intensive. Reference to llama BPE, it served as many function in-a-go. Namely input verification, UTF normalization, merging, matching and more. This BPE implementation is not a full feature to match titoken or HuggingFace BPE but only serve as a matching algorithm for BPE. And served as a core algorithm to speed up UTF normalization, merging and matching. Since the nature of GPU parallel process, there is no more need for regex pre-tokenization. Assumption can be made to offload matching process to GPU and leave CPU to process syncing and data feeding, as well as sequential process. Overall reduce CPU usage and speed up the deployment of LLM for low power device.</para>
+    <para>In this work, </para>
+    <para>(1) I proposed a compromised approach to speed up BPE process for leverage GPU process</para>
+    <para>(2) To identify the bottleneck of contemplate GPU accelerated BPE</para>
+  </sect1>
+  <sect1>
+    <title>Related Work</title>
+    <para/>
+    <para>Many attempt had bee taken by others like Amos You and his BlockBPE, which full offload BPE into GPU and trunking input message for parallelism. </para>
+    <para>In addition to tokenizer libraries, cuDF (NVIDIA, <ulink url="https://arxiv.org/html/2507.11941v1#bib.bib8">2025</ulink>) is a GPU DataFrame library that also has some tokenization functionality. </para>
+    <para>Several other BPE-inspired tokenization methods have emerged, each addressing specific challenges. </para>
+  </sect1>
+  <sect1>
+    <title>Background</title>
+    <para/>
+    <para/>
+    <sect2>
+      <title/>
+      <sect3>
+        <title>Naive BPE</title>
+        <para>Amos You had proposed a simple <ulink url="https://www.arxiv.org/abs/2507.11941">BPE</ulink> for reference. Overall logic is a byte compare loop for key-pair. That implied each character (with its tail) need to do comparison for exact match then table look-up for its rank for available matching.  </para>
+        <para>Since each comparison, aka C(i, L’) compare, and C(i+1, L’’) have its dependency. Because the l’ might changing and affect L’’ where L’’ is the end of string L’ so unless L’ is known, aka C(i, L’) is known. That imply serialized process. </para>
+        <para/>
+      </sect3>
+    </sect2>
+    <sect2>
+      <title/>
+      <sect3>
+        <title>BlockBPE</title>
+        <para>Amos You also proposed <ulink url="https://www.arxiv.org/abs/2507.11941">BlockBPE</ulink> to overcome the serialization problem by assigning every letter L from message M by a GPU thread, and do parallel process. Once finished parallel computation then pick the result of highest ranking of the result. This imply the heavy calculation is 2D vector C(L, W) where L is length of message and W is keyword-table. So trunking is introduces as well so split either L or W into smaller group can also boost the key matching process. This case will introduce delta error for keyword matching either in inappropriate split, but giving an overall O⁢(n) runtime benefit.</para>
+        <para/>
+      </sect3>
+    </sect2>
+    <sect2>
+      <title>Method</title>
+      <para>A compromised algorithm is introduced to enhance GPU parallelism and GPU thread locking. In short, let GPU do keyword matching with dedicated known message L’ provided every-time by CPU, where L’ = L(i). So the dependency of L’ and L’’ is broken down, as L’ and L’’ is independent. The computation vector become C’(L’, W(i)) where W(i) is the keyword-pair space. So computation time C(L, W) = sum(C’(L’, W) + n*delta-T) where C’(L’, W) is depending on length of entry “i” and length “l” of keyword, aka W(i, l), and n*delta-T is CPU&lt;-&gt;GPU communication time, n is average words in a message L. Thus overall become C(L, W) approx nO(d) &lt;&lt; O(nd) </para>
+      <para>So here is how to archive L’ and L’’ independence. From every multiple word message L, L’0 must be independent, so passing L’0 to GPU for comparison can be parallel. Ie, C(L’0, W) where it is treat as 1D vector for GPU thread. Every time there is a matched length L(W) and its corresponding matched ranking number R(W) return to CPU as result, matched L(W) can be act as indicator to generate L’ or aka, L’1 or L’’. This way CPU can decide L’1 for next C(L’1, W) submission.</para>
+      <para>This is indeed a compromised method to trade CPU&lt;-&gt;GPU sync time to reduce C(L, W) spanning. So this method can apply to input matching, input merging and possibly input UTF normalization. </para>
+      <para/>
+    </sect2>
+    <sect2>
+      <title>Implementation</title>
+      <para>At its core, the GPU vulkan shader is designed to process an input stream of characters, normalized to a 4-byte-per-character format, and match segments of this stream against a predefined dictionary of tokens. Each dictionary entry includes the token string, its length, a unique code, and its offset within the dictionary buffer. The shader launches multiple threads—up to 96 per workgroup—to concurrently scan the input and attempt matches against different dictionary entries. This parallelism is crucial for accelerating the tokenization process, especially on devices with limited CPU resources.</para>
+      <para>To ensure thread safety and correctness, the shader employs atomic operations such as atomicMax and atomicAdd. These operations coordinate updates to shared buffers, including the output token stream, input cursor positions, and debug logs. The use of atomic synchronization allows the shader to resolve conflicts when multiple threads identify potential matches, ensuring that only the best match is encoded and the input cursor is advanced appropriately.</para>
+    </sect2>
+    <sect2>
+      <title>Findings</title>
+      <para>For roughly compare llama.cpp qwen LLM processing, pre-tokenizing of string of 10 words need at least 2 minute with its trunking enabled. Local test TableBPE on same tokenizer.json dictionary to complete from within 30 seconds. Since llama.cpp BPE is much complicated tasks so direct compare is not conclusive. </para>
+      <para>The CPU&lt;-&gt;GPU communication is not playing a major role since input message is sort. On compare CPU vs GPU matching show significant difference. According to offload GPU D3D intel HD620 vs LLVM CPU i5 7200u, the time difference is big.</para>
+      <para> llvm: ⏱️ Dispatch time: 558031 ms ✅ Tokenization complete. 558031/4095 = 136 ms/Tok <emphasis>OR</emphasis> 0.0073 Tok/ms</para>
+      <para>dozen: ⏱️ Dispatch time: 144046 ms ✅ Tokenization complete. 144046/4095 = 35 ms/Tok <emphasis>OR</emphasis> 0.0284 Tok/ms</para>
+      <para>Around 3.78 times faster in dozen.</para>
+    </sect2>
+    <sect2>
+      <title>Conclusion</title>
+      <para>GPU offloading BPE as whole as llm is a big trend especially in low power device like phones. Nowadays llm inferencing is already working fine with GPU which is shown by llama.cpp so BPE offloading is increasingly important for tomorrow life style.</para>
+      <para/>
+    </sect2>
+  </sect1>
+</article>
