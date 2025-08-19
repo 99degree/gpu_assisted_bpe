@@ -1,3 +1,9 @@
+# Endorsement needed
+
+Could somebody can help endorse me for arXiv?
+
+https://arxiv.org/auth/endorse?x=NFZ4KD
+
 # gpu_assisted_bpe
 (C)Copyright 2025 George Chan
 
