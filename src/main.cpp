@@ -87,10 +87,12 @@ int main(int argc, char* argv[]) {
 
 	if (argc < 4) {
 		std::cerr << "❌ Missing length after '-u'\n";
+                std::cerr << "Suggested msg:" << "的縮寫00000000000000000Hello, world! 😊 €00000000000000" << "\n";
 		return 1;
 	}
 	limitedLength = atoi(argv[2]);
 	prompt = argv[3];
+
 	std::cout << "📝 Using direct prompt: \"" << prompt << "\"\n";
 	mode = 1;
     } else {
