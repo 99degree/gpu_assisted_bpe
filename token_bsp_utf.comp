@@ -61,7 +61,7 @@ int writeRawByte(uint charIndex) {
         // Write raw bytes (bit-shifted view of inputChar0)
         // char => uint expansion  e.g. 0x00000030 0x000000031 0x00000032 0x00000033 for "0123" as 0x33323130
         for (uint byteIndex = 0; byteIndex < 4; byteIndex++) {
-                encoded[baseIndex + byteIndex * 4] = (input32[charIndex] >> (byteIndex * 8)) & 0xFF;
+                debugOut[baseIndex + byteIndex * 4] = (input32[charIndex] >> (byteIndex * 8)) & 0xFF;
         }
 
 	return 0;
@@ -85,10 +85,10 @@ int writeRawByteExtend(uint charIndex) {
 	debugOut[baseIndex + byteIndex * 4 + 3] = ((inputChar[0] & 0x07) << 18) | ((inputChar[1] & 0x3F) << 12) | 
 								((inputChar[2] & 0x3F) << 6) | (inputChar[3] & 0x3F);
 
-	encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
-        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
-        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
-        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
+//	encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
+//        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
+//        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
+//        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
 #endif
 #if 1
         byteIndex = 1;
@@ -100,10 +100,10 @@ int writeRawByteExtend(uint charIndex) {
 	debugOut[baseIndex + byteIndex * 4 + 3] = ((inputChar[byteIndex] & 0x07) << 18) | ((inputChar[byteIndex + 1] & 0x3F) << 12) |
 							((inputChar[byteIndex + 2] & 0x3F) << 6) | (inputChar[byteIndex + 3] & 0x3F);
 
-        encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
-        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
-        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
-        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
+//        encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
+//        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
+//        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
+//        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
 
 #endif
 #if 1
@@ -116,10 +116,10 @@ int writeRawByteExtend(uint charIndex) {
         debugOut[baseIndex + byteIndex * 4 + 3] = ((inputChar[byteIndex] & 0x07) << 18) | ((inputChar[byteIndex + 1] & 0x3F) << 12) |
                                                         ((inputChar[byteIndex + 2] & 0x3F) << 6) | (inputChar[byteIndex + 3] & 0x3F);
 
-        encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
-        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
-        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
-        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
+ //       encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
+ //       encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
+ //       encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
+ //       encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
 
 #endif
 #if 1
@@ -132,10 +132,10 @@ int writeRawByteExtend(uint charIndex) {
         debugOut[baseIndex + byteIndex * 4 + 3] = ((inputChar[byteIndex] & 0x07) << 18) | ((inputChar[byteIndex + 1] & 0x3F) << 12) |
                                                         ((inputChar[byteIndex + 2] & 0x3F) << 6) | (inputChar[byteIndex + 3] & 0x3F);
 
-        encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
-        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
-        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
-        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
+//        encoded[baseIndex + byteIndex * 4 + 0] = debugOut[baseIndex + byteIndex * 4 + 0];
+//        encoded[baseIndex + byteIndex * 4 + 1] = debugOut[baseIndex + byteIndex * 4 + 1];
+//        encoded[baseIndex + byteIndex * 4 + 2] = debugOut[baseIndex + byteIndex * 4 + 2];
+//        encoded[baseIndex + byteIndex * 4 + 3] = debugOut[baseIndex + byteIndex * 4 + 3];
 
 #endif
 
@@ -164,44 +164,74 @@ void main_utf() {
 
     // Thread 0 performs final token extraction
     if (threadID == 0) {
-	// pos index to encoded[]
-	uint pos = 0; 
+//	uint idx[5]= { 3, 0xc, 24, 0, 0 };
         uint firstWrite = atomicAdd(writeLen, 1);
         if (atomicAdd(writeLen, 0) == 0) return;
 
+
+if (true) {	
+	// pos index to encoded[]
+	uint pos = 0; 
+	uint idx1 = 0;
+
         // Iterate through encoded buffer and extract valid UTF-8 tokens
 	// inputOffset and inputLength is assumed char idx
-        for (uint inputOffset = 0; inputOffset < inputLength;) {
-	    uint inputOffsetPos = inputOffset * 4 * 4;
+        for (uint inputOffset = 0; inputOffset < inputLength * 4;) {
+	    uint inputOffsetPos = inputOffset * 4 ;
             uint byteLen = utf_top_mapping[debugOut[inputOffsetPos] & 0xFF];
-
+#if 0
 	    if (byteLen > 4 || byteLen == 0) {
-		encoded[pos++] = 0xff000000 | (debugOut[inputOffsetPos] & 0xFF) | byteLen << 16;
+		encoded[pos] = 0xff000000 | (debugOut[inputOffsetPos] & 0xFF) | byteLen << 16;
 		inputOffset++;
+//		pos++;
 //		break;
 		continue;
 	    }
-
+#endif
 	    //utf_top_mapping is indicating the total length of a utf32 char
 	    // which is started by 1
             uint encodedIndex = inputOffsetPos + byteLen - 1;
 
+		if (idx1 > 0) {
+			if (idx1 != encodedIndex) {
+				
+				encoded[pos + 2] = 0xb0000000 | encodedIndex;
+				encoded[pos + 3] = 0xb0000000 | idx1;
+
+				break;
+
+			}
+
+		}
+
+
             // Bounds check to avoid overflow
-            if ((byteLen > 0) && (encodedIndex < (inputLength * 4))) {
+            if ((byteLen > 0) && (encodedIndex < (inputLength * 4 * 4))) {
                 uint outputChar = debugOut[encodedIndex];
+                encoded[pos] = outputChar;// | 0xf0000000 | byteLen << 24;
+		encoded[pos + 1] = outputChar; // | 0xe0000000 | byteLen << 24;
+		pos++;
+
+	    }
+
+		if (false) {
+//	    if (true) {
 		uint byteLen1 = utf_top_mapping[debugOut[inputOffset * 4 + byteLen * 4] & 0xFF];
-		uint pos1;
-		uint encodedIndex1 = (inputOffset + byteLen) * 4 * 4 + byteLen1;
-                encoded[pos1 = pos++] = outputChar | 0xf0000000 | byteLen << 24;
-		encoded[pos1+1] = 0xf0000000 | byteLen1 << 24 | debugOut[encodedIndex1];
+		uint encodedIndex1 = (inputOffset + byteLen) * 4 + byteLen1 - 1;
+		encoded[pos] = 0xd0000000 | byteLen1 << 24 | debugOut[encodedIndex1];
+	//	encoded[pos+1] = 0xc0000000 | inputOffset * 4 + byteLen * 4 + byteLen1 - 1;
+
+		encoded[pos+1] = 0xc0000000 | encodedIndex1;
+		idx1 = inputOffset * 4 + byteLen * 4 + byteLen1 - 1;
             }
 
             inputOffset += byteLen;
 
-
 //		break;
+
         }
     }
+}
 }
 
 // Entry point
