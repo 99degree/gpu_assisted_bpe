@@ -1,0 +1,174 @@
+#version 450
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+// Input buffer: contains UTF-8 encoded 32-bit words (4 bytes per word)
+layout(std430, binding = 0) readonly buffer InputStream {
+    uint input_utf8[];
+};
+
+// Output buffer: stores encoded UTF-32 bytes and final token output
+layout(std430, binding = 5) coherent buffer OutputStream {
+    uint encoded[];
+};
+
+// Shared scalar buffers for tracking output length and write index
+layout(std430, binding = 6) coherent buffer OutputLength {
+    uint writeLen;
+};
+
+// Debug output (expansion results)
+layout(std430, binding = 9) coherent buffer DebugBuffer {
+    uint debugOut[];
+};
+
+// Optional index buffer (kept for compatibility)
+layout(std430, binding = 10) coherent buffer OutputIndex {
+    uint writeIndex;
+};
+
+// Turn counter for ordered writes (host must initialize to 0)
+layout(std430, binding = 11) coherent buffer PerThreadTurn {
+    uint threadTurn;
+};
+
+// Push constants
+layout(push_constant) uniform Params {
+    uint inputLength;      // Number of input 32-bit words (each word contains 4 bytes)
+    uint maxTokens;        // Max number of tokens to generate (optional)
+    uint totalDictKeys;    // Not used here
+};
+
+// Lookup table: maps leading byte to expected UTF-8 sequence length
+const uint utf_top_mapping[256] = uint[256](
+    // 0–127: ASCII (1 byte)
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    // 128–191: continuation bytes (invalid as leading byte)
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    // 192–223: 2-byte sequences
+    2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+    // 224–239: 3-byte sequences
+    3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
+    // 240–247: 4-byte sequences
+    4,4,4,4,4,4,4,4,
+    // 248–255: invalid
+    0,0,0,0,0,0,0,0
+);
+
+// Writes raw bytes and extended UTF-8 variants starting at charIndex
+void writeRawByteExtend(uint charIndex) {
+    // charIndex indexes 32-bit words in input_utf8[]
+    uint baseIndex = charIndex * 16u;
+    uint b[8];
+
+    // Load up to 8 bytes (two consecutive 32-bit words)
+    // Host must ensure input_utf8 has at least inputLength+1 words to avoid OOB reads
+    for (uint i = 0u; i < 4u; ++i) {
+        b[i]      = (input_utf8[charIndex] >> (i * 8u)) & 0xFFu;
+        b[i + 4u] = (input_utf8[charIndex + 1u] >> (i * 8u)) & 0xFFu;
+    }
+
+    // Write raw leading bytes (keeps original layout)
+    for (uint i = 0u; i < 4u; ++i) {
+        debugOut[baseIndex + i * 4u]       = b[i];
+        debugOut[baseIndex + 16u + i * 4u] = b[i + 4u];
+    }
+
+    // Write 4 UTF-8 variants for each 4-byte window
+    for (uint i = 0u; i < 4u; ++i) {
+        uint offset = baseIndex + i * 4u;
+        uint b0 = b[i];
+        uint b1 = b[i + 1u];
+        uint b2 = b[i + 2u];
+        uint b3 = b[i + 3u];
+
+        debugOut[offset + 0u] = b0;
+        debugOut[offset + 1u] = ((b0 & 0x1Fu) << 6u) | (b1 & 0x3Fu);
+        debugOut[offset + 2u] = ((b0 & 0x0Fu) << 12u) | ((b1 & 0x3Fu) << 6u) | (b2 & 0x3Fu);
+        debugOut[offset + 3u] = ((b0 & 0x07u) << 18u) | ((b1 & 0x3Fu) << 12u) | ((b2 & 0x3Fu) << 6u) | (b3 & 0x3Fu);
+    }
+}
+
+void main_utf() {
+    uint tid = gl_GlobalInvocationID.x;
+    uint totalThreads = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    uint totalVariants = inputLength * 4u; // logical positions to scan
+
+    // -------------------------
+    // Stage 1: Expansion (parallel)
+    // -------------------------
+    for (uint i = tid; i < inputLength; i += totalThreads) {
+        writeRawByteExtend(i);
+    }
+
+    // Ensure expansion writes are visible to all threads
+    memoryBarrierBuffer();
+    barrier();
+
+    // -------------------------
+    // Stage 2: Parallel scan into per-thread local buffer (contiguous blocks)
+    // -------------------------
+    // Assign a contiguous chunk of logical variants to each thread
+    uint chunk = (totalVariants + totalThreads - 1u) / totalThreads;
+    uint start = tid * chunk;
+    uint end = start + chunk;
+    if (end > totalVariants) end = totalVariants;
+
+    // Per-thread local buffer (no overflow guard per user request)
+    const uint MAX_LOCAL_TOKENS = 1024u; // tune as needed
+    uint localCount = 0u;
+    uint localTokens[MAX_LOCAL_TOKENS];
+
+    for (uint p = start; p < end; ++p) {
+        uint idx = p * 4u; // index into debugOut for this variant's leading byte
+        uint lead = debugOut[idx] & 0xFFu;
+        uint len = utf_top_mapping[lead];
+
+        if (len == 0u || len > 4u) {
+            continue;
+        }
+
+        uint endIdx = idx + len - 1u;
+        if (endIdx < inputLength * 16u) {
+            // store token in local buffer (no bounds check)
+            localTokens[localCount++] = debugOut[endIdx];
+        }
+    }
+
+    // -------------------------
+    // Stage 3: Ordered reservation + write (serialized by turn)
+    // -------------------------
+    // Host must initialize threadTurn = 0 and writeLen = 0 before dispatch.
+    // Threads wait for their turn (tid order) and then reserve a contiguous block
+    // by doing a single atomicAdd(writeLen, localCount) and writing tokens there.
+
+    // Wait for our turn
+    while (atomicAdd(threadTurn, 0u) != tid) {
+        // busy-wait; this serializes writes in tid order
+    }
+
+    // Reserve contiguous block in encoded[]
+    uint base = 0u;
+    if (localCount > 0u) {
+        base = atomicAdd(writeLen, localCount);
+        // write local tokens in order
+        for (uint i = 0u; i < localCount; ++i) {
+            encoded[base + i] = localTokens[i];
+        }
+    }
+
+    // Advance turn so next thread can proceed
+    atomicAdd(threadTurn, 1u);
+
+    // Ensure writes are visible to host after dispatch
+    memoryBarrierBuffer();
+    barrier();
+}
+
+void main() {
+    main_utf();
+}
