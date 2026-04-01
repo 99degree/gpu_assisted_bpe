@@ -1,0 +1,43 @@
+shared float ratios[INPUT_SIZE];
+shared float bestRatio;
+shared int   bestIdx;
+shared int   iter; // shared frontier
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+
+    if (tid == 0) {
+        bestRatio = -1.0;
+        bestIdx   = 0;
+        iter      = 0;
+    }
+    barrier(); // init sync
+
+    int local_iter = 0;
+
+    for (int step = 0; step < INPUT_SIZE; ++step) {
+        // Sync local iter with shared frontier
+        if (local_iter < iter) {
+            local_iter = iter;
+        } else if (local_iter > iter) {
+            iter = local_iter;
+        }
+
+        float localRatio = ratios[local_iter];
+        float sharedRatio = bestRatio;
+
+        if (localRatio > sharedRatio) {
+            bestRatio = localRatio;
+            bestIdx   = local_iter;
+        }
+
+        local_iter++;
+    }
+
+    barrier(); // final sync
+
+    if (tid == 0) {
+        encoded[outputPos] = bestIdx;
+        outputPos++;
+    }
+}
