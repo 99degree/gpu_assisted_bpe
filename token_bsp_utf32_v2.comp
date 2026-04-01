@@ -1,0 +1,109 @@
+#version 450
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+// Input buffer: contains UTF-8 encoded 32-bit words (4 bytes per word)
+layout(std430, binding = 0) readonly buffer InputStream { uint input_utf8[]; };
+
+// Output buffer: stores encoded UTF-32 bytes and final token output
+layout(std430, binding = 5) coherent buffer OutputStream { uint encoded[]; };
+
+// Shared scalar buffers for tracking output length
+layout(std430, binding = 6) coherent buffer OutputLength { uint writeLen; };
+
+// Debug output (expansion results)
+layout(std430, binding = 9) coherent buffer DebugBuffer { uint debugOut[]; };
+
+// Optional index buffer (kept for compatibility)
+layout(std430, binding = 10) coherent buffer OutputIndex { uint writeIndex; };
+
+// NEW: Atomic status vector for synchronization
+layout(std430, binding = 11) coherent buffer StatusBuf { int status[]; };
+
+// Push constants
+layout(push_constant) uniform Params {
+    uint inputLength;      // Number of input 32-bit words
+    uint maxTokens;        // Max number of tokens to generate
+    uint totalDictKeys;    // Not used here
+};
+
+// Lookup table: maps leading byte to expected UTF-8 sequence length
+const uint utf_top_mapping[256] = uint[256](
+    // 0–127: ASCII (1 byte)
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    // 128–191: continuation bytes
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    // 192–223: 2-byte sequences
+    2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+    // 224–239: 3-byte sequences
+    3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
+    // 240–247: 4-byte sequences
+    4,4,4,4,4,4,4,4,
+    // 248–255: invalid
+    0,0,0,0,0,0,0,0
+);
+
+// Expansion: writes raw bytes and UTF-8 variants
+void writeRawByteExtend(uint charIndex) {
+    uint baseIndex = charIndex * 16u;
+    uint b[8];
+    for (uint i = 0u; i < 4u; ++i) {
+        b[i]      = (input_utf8[charIndex] >> (i * 8u)) & 0xFFu;
+        b[i + 4u] = (input_utf8[charIndex + 1u] >> (i * 8u)) & 0xFFu;
+    }
+    for (uint i = 0u; i < 4u; ++i) {
+        debugOut[baseIndex + i * 4u]       = b[i];
+        debugOut[baseIndex + 16u + i * 4u] = b[i + 4u];
+    }
+    for (uint i = 0u; i < 4u; ++i) {
+        uint offset = baseIndex + i * 4u;
+        uint b0 = b[i], b1 = b[i+1u], b2 = b[i+2u], b3 = b[i+3u];
+        debugOut[offset + 0u] = b0;
+        debugOut[offset + 1u] = ((b0 & 0x1Fu) << 6u) | (b1 & 0x3Fu);
+        debugOut[offset + 2u] = ((b0 & 0x0Fu) << 12u) | ((b1 & 0x3Fu) << 6u) | (b2 & 0x3Fu);
+        debugOut[offset + 3u] = ((b0 & 0x07u) << 18u) | ((b1 & 0x3Fu) << 12u) | ((b2 & 0x3Fu) << 6u) | (b3 & 0x3Fu);
+    }
+}
+
+void main_utf() {
+    uint tid = gl_GlobalInvocationID.x;
+    uint totalThreads = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+
+    // Stage 1: Expansion
+    for (uint i = tid; i < inputLength; i += totalThreads) {
+        writeRawByteExtend(i);
+        atomicExchange(status[i], 1); // mark ready
+    }
+
+    memoryBarrierBuffer();
+    barrier();
+
+    // Stage 2: Compaction with atomic status
+    uint idx = tid;
+    for (uint stride = 1; stride < inputLength; stride <<= 1) {
+        if ((idx % (stride*2)) == 0) {
+            uint partner = idx + stride;
+            if (partner >= inputLength) break;
+
+            // wait until partner ready
+            while (atomicAdd(status[partner], 0) == 0) { }
+
+            uint lead = debugOut[partner*4u] & 0xFFu;
+            uint len  = utf_top_mapping[lead];
+            if (len > 0u && len <= 4u) {
+                uint endIdx = partner*4u + len - 1u;
+                if (endIdx < inputLength * 16u) {
+                    uint pos = atomicAdd(writeLen, 1u);
+                    encoded[pos] = debugOut[endIdx];
+                }
+            }
+
+            atomicExchange(status[idx], 1); // mark leader ready
+        }
+    }
+}
+
+void main() { main_utf(); }
