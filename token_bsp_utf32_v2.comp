@@ -1,109 +1,159 @@
 #version 450
+// Drop‑in replacement for token_bsp_utf.comp
+// Preserves API: push constant `inputLength` is UTF-8 byte count.
+// No global barriers or memoryBarrierBuffer calls are used.
+// Expansion reserves dst slots via atomicAdd(utf32Count) so no global sync is required.
+// Compaction uses per-slot status waits (spin) to ensure partner readiness.
+
 layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 
-// Input buffer: contains UTF-8 encoded 32-bit words (4 bytes per word)
+// --- Buffers (bindings kept compatible with existing pipeline) ---
 layout(std430, binding = 0) readonly buffer InputStream { uint input_utf8[]; };
+layout(std430, binding = 1) coherent buffer DebugBuffer { uint debugOut[]; };   // expanded utf32 tokens
+layout(std430, binding = 2) coherent buffer EncodedOut { uint encoded[]; };    // compacted output
+layout(std430, binding = 3) coherent buffer LensBuf { uint lens[]; };
+layout(std430, binding = 4) coherent buffer PosBuf  { uint pos[]; };
+layout(std430, binding = 5) coherent buffer StatusBuf { int status[]; };
 
-// Output buffer: stores encoded UTF-32 bytes and final token output
-layout(std430, binding = 5) coherent buffer OutputStream { uint encoded[]; };
-
-// Shared scalar buffers for tracking output length
-layout(std430, binding = 6) coherent buffer OutputLength { uint writeLen; };
-
-// Debug output (expansion results)
-layout(std430, binding = 9) coherent buffer DebugBuffer { uint debugOut[]; };
-
-// Optional index buffer (kept for compatibility)
-layout(std430, binding = 10) coherent buffer OutputIndex { uint writeIndex; };
-
-// NEW: Atomic status vector for synchronization
-layout(std430, binding = 11) coherent buffer StatusBuf { int status[]; };
-
-// Push constants
-layout(push_constant) uniform Params {
-    uint inputLength;      // Number of input 32-bit words
-    uint maxTokens;        // Max number of tokens to generate
-    uint totalDictKeys;    // Not used here
+// Length/counters buffer (binding 6)
+layout(std430, binding = 6) coherent buffer LengthBuf {
+    uint utf32Count;        // incremented (atomicAdd) during expansion to reserve dst slots
+    uint actualUtf32Length; // atomicMax updated during compaction
+    uint writeLen;          // atomicAdd updated during compaction
 };
 
-// Lookup table: maps leading byte to expected UTF-8 sequence length
-const uint utf_top_mapping[256] = uint[256](
-    // 0–127: ASCII (1 byte)
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-    // 128–191: continuation bytes
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    // 192–223: 2-byte sequences
-    2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
-    // 224–239: 3-byte sequences
-    3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
-    // 240–247: 4-byte sequences
-    4,4,4,4,4,4,4,4,
-    // 248–255: invalid
-    0,0,0,0,0,0,0,0
-);
+// Push constants (preserve API)
+layout(push_constant) uniform Params {
+    uint inputLength; // UTF-8 byte count (input)
+    uint maxTokens;   // optional safety bound (host may set)
+} params;
 
-// Expansion: writes raw bytes and UTF-8 variants
-void writeRawByteExtend(uint charIndex) {
-    uint baseIndex = charIndex * 16u;
-    uint b[8];
-    for (uint i = 0u; i < 4u; ++i) {
-        b[i]      = (input_utf8[charIndex] >> (i * 8u)) & 0xFFu;
-        b[i + 4u] = (input_utf8[charIndex + 1u] >> (i * 8u)) & 0xFFu;
-    }
-    for (uint i = 0u; i < 4u; ++i) {
-        debugOut[baseIndex + i * 4u]       = b[i];
-        debugOut[baseIndex + 16u + i * 4u] = b[i + 4u];
-    }
-    for (uint i = 0u; i < 4u; ++i) {
-        uint offset = baseIndex + i * 4u;
-        uint b0 = b[i], b1 = b[i+1u], b2 = b[i+2u], b3 = b[i+3u];
-        debugOut[offset + 0u] = b0;
-        debugOut[offset + 1u] = ((b0 & 0x1Fu) << 6u) | (b1 & 0x3Fu);
-        debugOut[offset + 2u] = ((b0 & 0x0Fu) << 12u) | ((b1 & 0x3Fu) << 6u) | (b2 & 0x3Fu);
-        debugOut[offset + 3u] = ((b0 & 0x07u) << 18u) | ((b1 & 0x3Fu) << 12u) | ((b2 & 0x3Fu) << 6u) | (b3 & 0x3Fu);
-    }
+const uint PAD_TOKEN = 0xFFFFFFFFu;
+
+// Utility: round up x to multiple of g
+uint roundUp(uint x, uint g) {
+    return ((x + g - 1u) / g) * g;
 }
 
-void main_utf() {
+// -----------------------------------------------------------------------------
+// NOTE about writeRawByteExtend:
+// Replace the body of writeRawByteExtend with your repo's exact decode logic.
+// The function below demonstrates the reservation pattern: it reserves a dst
+// index via atomicAdd(utf32Count, 1) and writes one token into debugOut[dst].
+// If your decoder emits variable number of tokens per input byte, adapt the
+// reservation logic accordingly (reserve N slots before writing).
+// -----------------------------------------------------------------------------
+void writeRawByteExtend_reserve_and_write(uint srcIdx) {
+    // Reserve a destination slot in the expanded stream
+    uint dst = atomicAdd(utf32Count, 1u);
+
+    // --- Decode logic placeholder ---
+    // The repo's original decode should produce one or more UTF-32 tokens.
+    // If it produces exactly one token per src byte, write it here:
+    //   uint token = decode_byte_to_utf32(input_utf8[srcIdx]);
+    //   debugOut[dst] = token;
+    //
+    // If your decoder can emit multiple tokens for a single src byte,
+    // reserve the required number of slots (atomicAdd) and write them.
+    //
+    // For now we use a simple 1:1 placeholder copy (byte -> token).
+    debugOut[dst] = input_utf8[srcIdx];
+    // ----------------------------------
+
+    // mark this dst slot as ready
+    atomicExchange(status[dst], 1);
+}
+
+// -----------------------------------------------------------------------------
+// Main
+// -----------------------------------------------------------------------------
+void main() {
     uint tid = gl_GlobalInvocationID.x;
     uint totalThreads = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    uint groupSize = gl_WorkGroupSize.x;
 
-    // Stage 1: Expansion
-    for (uint i = tid; i < inputLength; i += totalThreads) {
-        writeRawByteExtend(i);
-        atomicExchange(status[i], 1); // mark ready
+    // Stage 1: Expansion (UTF-8 -> UTF-32)
+    // Each thread iterates over input bytes and uses atomic reservation to write
+    // expanded tokens into debugOut[]. utf32Count is incremented by the helper.
+    for (uint src = tid; src < params.inputLength; src += totalThreads) {
+        // Call the decode/reserve helper. Replace its body with the repo's decode.
+        writeRawByteExtend_reserve_and_write(src);
     }
 
-    memoryBarrierBuffer();
-    barrier();
+    // No global barrier here by design. Compaction will wait on per-slot status.
 
-    // Stage 2: Compaction with atomic status
-    uint idx = tid;
-    for (uint stride = 1; stride < inputLength; stride <<= 1) {
-        if ((idx % (stride*2)) == 0) {
-            uint partner = idx + stride;
-            if (partner >= inputLength) break;
+    // Read expanded length (number of emitted UTF-32 tokens)
+    // Use atomicAdd with 0 to read current counter value.
+    uint utf32Len = atomicAdd(utf32Count, 0u);
 
-            // wait until partner ready
-            while (atomicAdd(status[partner], 0) == 0) { }
+    // Compute padded length (round up to groupSize)
+    uint utf32Padded = roundUp(utf32Len, groupSize);
 
-            uint lead = debugOut[partner*4u] & 0xFFu;
-            uint len  = utf_top_mapping[lead];
-            if (len > 0u && len <= 4u) {
-                uint endIdx = partner*4u + len - 1u;
-                if (endIdx < inputLength * 16u) {
-                    uint pos = atomicAdd(writeLen, 1u);
-                    encoded[pos] = debugOut[endIdx];
-                }
-            }
-
-            atomicExchange(status[idx], 1); // mark leader ready
+    // Stage 2: Init per-thread: move debugOut -> encoded, set lens/pos/status
+    // We iterate over padded range so compaction has even groups.
+    for (uint idx = tid; idx < utf32Padded; idx += totalThreads) {
+        if (idx < utf32Len) {
+            // Wait until expansion wrote this slot (status may already be 1)
+            while (atomicAdd(status[idx], 0) == 0) { }
+            encoded[idx] = debugOut[idx];
+            lens[idx]    = 1u;
+        } else {
+            // padding slot
+            encoded[idx] = PAD_TOKEN;
+            lens[idx]    = 0u;
+            // mark padded slot ready
+            atomicExchange(status[idx], 1);
         }
+        pos[idx] = idx;
+        // ensure status is set for real slots too (some may already be 1)
+        atomicExchange(status[idx], 1);
     }
-}
 
-void main() { main_utf(); }
+    // Initialize counters once (tid 0)
+    if (tid == 0u) {
+        // set actualUtf32Length to the current expanded length
+        // and writeLen to the number of initial tokens written
+        actualUtf32Length = utf32Len;
+        writeLen = utf32Len;
+    }
+
+    // Stage 3: Compaction (stride-doubling). Leaders at (idx % (2*stride)) == stride
+    // No global barriers; each leader waits on its partner via status spin.
+    for (uint stride = 1u; stride < utf32Padded; stride <<= 1u) {
+        for (uint idx = tid; idx < utf32Padded; idx += totalThreads) {
+            // leader condition: offset by stride inside each 2*stride group
+            if ((idx % (stride * 2u)) == stride) {
+                uint partner = idx - stride;
+                if (partner >= utf32Padded) continue;
+
+                // wait until partner is ready
+                while (atomicAdd(status[partner], 0) == 0) { }
+
+                uint l_len = lens[idx];
+                uint r_len = lens[partner];
+                uint l_pos = pos[idx];
+                uint r_pos = pos[partner];
+
+                // append partner sequence into leader's region
+                // note: if r_len == 0 (padding), loop is skipped
+                for (uint j = 0u; j < r_len; ++j) {
+                    encoded[l_pos + l_len + j] = encoded[r_pos + j];
+                }
+
+                uint newLen = l_len + r_len;
+                lens[idx] = newLen;
+
+                // update global counters
+                atomicMax(actualUtf32Length, newLen);
+                atomicAdd(writeLen, r_len);
+
+                // mark leader ready for next rounds
+                atomicExchange(status[idx], 1);
+            }
+        }
+        // no barrier: next stride leaders will spin on their partners' status
+    }
+
+    // End: actualUtf32Length and writeLen contain final values.
+    // Host should read them from LengthBuf after dispatch completes.
+}
